@@ -2,33 +2,39 @@
 
 Synchronisiert CLAUDE.md, Skills und Setup zwischen Mac und Windows.
 
+## Schutz
+
+- `main` Branch ist geschuetzt (Branch Protection)
+- Kein direktes Pushen auf main moeglich
+- Aenderungen NUR ueber Pull Request
+- Force-Push und Branch-Loeschen deaktiviert
+- CI prueft PowerShell-Syntax + Token-Budget bei jedem PR
+
 ## Windows Setup (Erstmalig)
+
+PowerShell als Admin oeffnen, eingeben:
 
 ```powershell
 irm https://raw.githubusercontent.com/dsactivi-2/claude-config/main/setup.ps1|iex
 ```
 
-## Sync
+Dann Repo klonen fuer Sync:
 
-### Mac -> GitHub (Push)
-```bash
-./scripts/sync-push.sh
-```
-
-### GitHub -> Windows (Pull)
 ```powershell
-.\scripts\sync-pull.ps1
+cd $env:USERPROFILE
+git clone https://github.com/dsactivi-2/claude-config.git
 ```
 
-### Automatisch (Cron / Task Scheduler)
+Taeglich automatisch pullen (Task Scheduler):
 
-**Mac** — alle 30 Min:
-```bash
-crontab -e
-# */30 * * * * /path/to/claude-config/scripts/sync-push.sh
-```
-
-**Windows** — alle 30 Min:
 ```powershell
-schtasks /create /tn "ClaudeSync" /tr "powershell -File %USERPROFILE%\claude-config\scripts\sync-pull.ps1" /sc minute /mo 30
+schtasks /create /tn "ClaudeSync" /tr "powershell -ExecutionPolicy Bypass -File %USERPROFILE%\claude-config\scripts\sync-pull.ps1" /sc daily /st 07:00
+```
+
+## Mac Sync (laeuft automatisch)
+
+Cron taeglich um 06:00 — erstellt PR bei Aenderungen:
+
+```
+0 6 * * * /Users/dsselmanovic/claude-config/scripts/sync-push.sh
 ```
