@@ -1,0 +1,90 @@
+name: Validate Setup Script & CLAUDE.md
+
+on:
+  push:
+    branches: [main]
+    paths: ['setup.ps1', 'CLAUDE.md']
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-powershell:
+    name: PowerShell Syntax Check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.PSParser]::Tokenize(
+            (Get-Content setup.ps1 -Raw), [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "setup.ps1 syntax OK" -ForegroundColor Green
+
+      - name: Dry-run structure check
+        shell: pwsh
+        run: |
+          # Verify script contains all required sections
+          $content = Get-Content setup.ps1 -Raw
+          $checks = @(
+            @{name="Node.js check";    pattern="Get-Command node"},
+            @{name="npm install";      pattern="npm install -g"},
+            @{name="Directory setup";  pattern="New-Item -ItemType Directory"},
+            @{name="OMC junction";     pattern="oh-my-claude-sisyphus"},
+            @{name="Skills install";   pattern="vercel-labs/skills"},
+            @{name="MCP register";     pattern="claude mcp add"},
+            @{name="CLAUDE.md handle"; pattern="CLAUDE.md"}
+          )
+          $failed = 0
+          foreach ($c in $checks) {
+            if ($content -match [regex]::Escape($c.pattern)) {
+              Write-Host "  OK  $($c.name)" -ForegroundColor Green
+            } else {
+              Write-Host "  FAIL $($c.name)" -ForegroundColor Red
+              $failed++
+            }
+          }
+          if ($failed -gt 0) { exit 1 }
+
+  validate-claudemd:
+    name: CLAUDE.md Token Count
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tiktoken
+        run: pip install tiktoken
+
+      - name: Count tokens
+        run: |
+          python3 -c "
+          import tiktoken
+          enc = tiktoken.get_encoding('cl100k_base')
+          with open('CLAUDE.md') as f:
+              content = f.read()
+          tokens = len(enc.encode(content))
+          lines = content.count('\n')
+          print(f'CLAUDE.md: {tokens} tokens, {lines} lines, {len(content)} chars')
+          if tokens > 15000:
+              print(f'WARNING: {tokens} tokens exceeds 15k budget!')
+              exit(1)
+          print('Token budget OK')
+          "
+
+  notify-sync:
+    name: Notify sync available
+    runs-on: ubuntu-latest
+    needs: [validate-powershell, validate-claudemd]
+    if: github.event_name == 'push'
+    steps:
+      - name: Summary
+        run: |
+          echo "## Sync Ready" >> $GITHUB_STEP_SUMMARY
+          echo "CLAUDE.md and setup.ps1 validated." >> $GITHUB_STEP_SUMMARY
+          echo "Pull on Windows: \`git pull\` or run \`sync-pull.ps1\`" >> $GITHUB_STEP_SUMMARY
