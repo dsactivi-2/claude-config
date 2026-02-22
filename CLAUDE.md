@@ -92,40 +92,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | **Data Science** | `scientist-low` | `scientist` | `scientist-high` |
 | **Git** | - | `git-master` | - |
 
-### Agent Selection by Task
-
-| Task | Agent | Tier |
-|------|-------|------|
-| Quick code lookup | `explore` | LOW |
-| Find files/patterns | `explore`, `explore-medium` | LOW/MED |
-| Complex architectural search | `explore-high` | HIGH |
-| Simple code change | `executor-low` | LOW |
-| Feature implementation | `executor` | MED |
-| Complex refactoring | `executor-high` | HIGH |
-| Debug simple issue | `architect-low` | LOW |
-| Debug complex issue | `architect` | HIGH |
-| UI component | `designer` | MED |
-| Complex UI system | `designer-high` | HIGH |
-| Write docs/comments | `writer` | LOW |
-| Research docs/APIs | `researcher` | MED |
-| Analyze images/diagrams | `vision` | MED |
-| Strategic planning | `planner` | HIGH |
-| Review/critique plan | `critic` | HIGH |
-| Pre-planning analysis | `analyst` | HIGH |
-| Interactive CLI testing | `qa-tester` | MED |
-| Security review | `security-reviewer` | HIGH |
-| Quick security scan | `security-reviewer-low` | LOW |
-| Fix build errors | `build-fixer` | MED |
-| Simple build fix | `build-fixer-low` | LOW |
-| TDD workflow | `tdd-guide` | MED |
-| Quick test suggestions | `tdd-guide-low` | LOW |
-| Code review | `code-reviewer` | HIGH |
-| Quick code check | `code-reviewer-low` | LOW |
-| Data analysis/stats | `scientist` | MED |
-| Quick data inspection | `scientist-low` | LOW |
-| Complex ML/hypothesis | `scientist-high` | HIGH |
-| Complex autonomous work | `deep-executor` | HIGH |
-| Git operations | `git-master` | MED |
+*Agent-Zuordnung nach Task: `~/mem-search.sh "agent selection"`*
 
 ### Tiered Architect Verification
 
@@ -228,13 +195,6 @@ When you detect trigger patterns above, you MUST invoke the corresponding skill 
 - If BOTH present, **ecomode wins** (more token-restrictive)
 - Generic "fast"/"parallel" -> read `~/.claude/.omc-config.json` -> `defaultExecutionMode` (default: ultrawork)
 
-### Mode Relationships
-
-- **ralph includes ultrawork**: ralph is a persistence wrapper around ultrawork's parallelism
-- **ecomode is a modifier**: It only changes model routing, not execution behavior
-- **autopilot can transition**: To ralph (persistence) or ultraqa (QA cycling)
-- **autopilot and ultrapilot are mutually exclusive**
-
 ---
 
 ## MCP Tools
@@ -291,105 +251,9 @@ When you detect trigger patterns above, you MUST invoke the corresponding skill 
 - **For parallel work:** Use the Background Orchestration Pattern below
 - **Timeout:** `wait_for_job` supports up to 3,600,000ms (1 hour) timeout
 
-**Tool Parameters (both ask_gemini and ask_codex):**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_role` | string | Yes | Agent perspective (see routing table above) |
-| `prompt_file` | string | Yes | Path to file containing **task instructions** (what the CLI should do). Write under `{working_directory}/.omc/prompts/` using naming convention `{tool}-{purpose}-{timestamp}.md`. |
-| `output_file` | string | Yes | Path for **work summary** (what was done). The CLI may write here directly via shell, or the wrapper writes stdout if not. Use `-summary.md` suffix. |
-| `files` / `context_files` | array | No | File paths to include as context |
-| `model` | string | No | Model to use (has defaults and fallback chains) |
-| `background` | boolean | No | Run in background (non-blocking) |
-| `working_directory` | string | No | Project directory for the CLI to operate in. Defaults to `process.cwd()`. Can be any valid directory — does NOT need to be within CC's worktree. |
-
-**Notes:**
-- Write task instructions to `prompt_file`, not inline prompts
-- **Two-layer model**: The MCP wrapper reads `context_files` to build the prompt; the CLI (Codex/Gemini in --full-auto/--yolo mode) has full filesystem access during execution
-- The CLI can read additional files and write directly to `output_file` or other files
-
-**Security boundary:** `working_directory` is the trust boundary. `prompt_file` and `output_file` must resolve to paths within `working_directory`. The `working_directory` itself can be any accessible directory — it is NOT restricted to CC's current worktree. This allows cross-project use (e.g., running CC in one repo while delegating Codex/Gemini work to another).
-
-**Semantic Model:**
-- `prompt_file`: Task instructions ("Refactor X", "Review Y", "Fix Z")
-- `output_file`: Work summary/report (what was done, decisions made)
-- `context_files`: Initial context for prompt assembly
-- **Direct edits**: The CLI can read/write any file in the working directory
-
-### Background Orchestration Pattern (Spawn -> Check -> Await)
-
-When agents need Codex/Gemini and the orchestrator has other work:
-
-**1. SPAWN** — Launch agent in background:
-```
-Task(subagent_type="oh-my-claudecode:architect",
-     model="opus",
-     prompt="Analyze architecture...",
-     run_in_background=true)
-```
-
-**2. CHECK** — Continue independent tasks. Periodically check:
-```
-check_job_status(job_id="...")  // Non-blocking
-```
-
-**3. AWAIT** — When results needed OR no other work:
-```
-wait_for_job(job_id="...", timeout_ms=3600000)  // Up to 1 hour
-```
-
-**Critical Rules:**
-- **Dependency Rule:** If a downstream decision depends on Codex/Gemini output, you MUST switch from CHECK to AWAIT before finalizing that decision
-- **Never await immediately** after spawning unless the delegation is the critical path
-- **Max concurrent:** Cap at 2-3 parallel background delegations to avoid attention loss
-
-**Decision Matrix:**
-
-| Situation | Pattern |
-|-----------|---------|
-| Agent needs Codex/Gemini AND orchestrator has other tasks | Background (SPAWN/CHECK/AWAIT) |
-| Agent needs Codex/Gemini AND this is the only/critical task | Blocking call |
-| Quick validation (<30s expected) | Blocking call |
-| Complex analysis, multi-file review | Background |
-
-**Failure Modes:**
-
-| Failure | Handling |
-|---------|----------|
-| Tool unavailable/not configured | Fall back to local reasoning; log "delegation unavailable" |
-| Long-running delegation | Keep working on independent tasks; only await at dependency points |
-| Stale outputs (code changed since spawn) | Re-spawn OR treat results as advisory only |
-| User cancels/mode ends | Ignore background outputs unless explicitly resumed |
-| Verification gating | NEVER claim "validated by Codex/Gemini" unless you awaited and integrated the result |
-
-### Job Management Tools
-
-| Tool | Description | When to Use |
-|------|-------------|-------------|
-| `check_job_status` | Non-blocking status check | Polling during parallel work |
-| `wait_for_job` | Blocking wait until completion | When results needed to proceed |
-| `list_jobs` | List background jobs (filter by status) | Debugging, monitoring |
-| `kill_job` | Send signal to running job | Cancel stuck/unnecessary jobs |
-
-**Status Values:** `spawned`, `running`, `completed`, `failed`
-
-### Skill-Level MCP Usage
-
-Skills should call MCPs directly instead of spawning Claude agents:
-
-| Skill | MCP Tool | Direct Call |
-|-------|----------|-------------|
-| `ralplan` | Codex | Call `ask_codex` with planner/architect/critic roles directly |
-| `frontend-ui-ux` | Gemini | Call `ask_gemini` with designer role directly |
-| `code-review` | Codex | Call `ask_codex` with code-reviewer role directly |
-| `security-review` | Codex | Call `ask_codex` with security-reviewer role directly |
-| `analyze` | Codex | Call `ask_codex` with architect role directly |
-| `plan` | Codex | Call `ask_codex` with planner role directly |
-
-**Enforcement:**
-- Skills call MCP tools directly — skip spawning Claude agents for analysis/review/design
-- If MCP unavailable, fall back to spawning the equivalent Claude agent
-- Use Background Orchestration Pattern for parallel MCP calls
+*MCP Tool Parameters: `~/mem-search.sh "mcp tool parameters"`*
+*Background Orchestration (Spawn/Check/Await): `~/mem-search.sh "background orchestration"`*
+*Skill-Level MCP Usage: `~/mem-search.sh "Skill-Level"`*
 
 ### OMC State Tools
 
@@ -429,35 +293,7 @@ Persistent project info at `{worktree}/.omc/project-memory.json`.
 | `project_memory_add_note` | Add categorized note |
 | `project_memory_add_directive` | Add persistent user directive |
 
-### LSP Tools
-
-| Tool | Description | Agent Access |
-|------|-------------|-------------|
-| `lsp_hover` | Type info and docs at position | Orchestrator-direct |
-| `lsp_goto_definition` | Jump to symbol definition | Orchestrator-direct |
-| `lsp_find_references` | Find all usages of a symbol | `explore-high` only |
-| `lsp_document_symbols` | File symbol outline | `explore` family |
-| `lsp_workspace_symbols` | Search symbols by name | `explore` family |
-| `lsp_diagnostics` | File errors/warnings | Most agents |
-| `lsp_diagnostics_directory` | Project-wide type checking (tsc --noEmit) | `architect`, `executor`, `build-fixer` |
-| `lsp_prepare_rename` | Check rename feasibility | Orchestrator-direct |
-| `lsp_rename` | Rename symbol across project | Orchestrator-direct |
-| `lsp_code_actions` | Available refactorings/quick fixes | Orchestrator-direct |
-| `lsp_code_action_resolve` | Full edit details for code action | Orchestrator-direct |
-| `lsp_servers` | List available language servers | Orchestrator-direct |
-
-### AST Tools
-
-| Tool | Description | Agent Access |
-|------|-------------|-------------|
-| `ast_grep_search` | Structural code pattern search | `explore`, `architect`, `code-reviewer` |
-| `ast_grep_replace` | Structural code transformation | `executor-high`, `deep-executor` only |
-
-### Python REPL
-
-| Tool | Description | Agent Access |
-|------|-------------|-------------|
-| `python_repl` | Persistent Python REPL for data analysis | `scientist` (all tiers) |
+*LSP/AST/REPL Tools: `~/mem-search.sh "LSP"`*
 
 ---
 
@@ -669,6 +505,43 @@ Wenn KEIN installierter Skill passt UND die Aufgabe ein spezielles Domaenenwisse
 Wenn eine Aufgabe mehrere Skills betrifft (z.B. "Schreib Tests fuer die Release-Pipeline"):
 - Aktiviere alle relevanten Skills still (`verification-quality` + `github-release-management`)
 - Melde: `[Skills: verification-quality, github-release-management aktiviert]`
+
+## Skill-Weitergabe an Sub-Agenten (PFLICHT)
+
+**Sub-Agenten erben KEINE Skills aus der Hauptsession.**
+Bei JEDER Agent-Delegation mit Skill-Bezug MUSS der relevante Skill-Pfad im Prompt stehen.
+
+**Methode:** Agent liest die Skill-Datei selbst via Read-Tool (token-effizient, immer aktuell).
+
+**Format im Task-Prompt:**
+```
+Lies zuerst fuer Kontext: ~/.agents/skills/[SKILL-NAME]/SKILL.md
+Dann fuehre aus: [Aufgabe]
+```
+
+**Skill-Pfad-Mapping:**
+
+| Aufgabe betrifft | Skill-Datei(en) im Prompt mitgeben |
+|-----------------|-----------------------------------|
+| Portkey + Python | `~/.agents/skills/portkey-python-sdk/SKILL.md` |
+| Portkey + TypeScript | `~/.agents/skills/portkey-typescript-sdk/SKILL.md` |
+| API-Key Sicherheit | `~/.agents/skills/api-key-manager/SKILL.md` |
+| API Gateway (Kong/Nginx/Traefik) | `~/.agents/skills/api-gateway-configuration/SKILL.md` |
+
+**Mehrere Skills:** Bei kombinierten Aufgaben alle relevanten Skill-Pfade auflisten.
+
+**Beispiel:**
+```
+Task(prompt="""
+Lies zuerst diese Skills:
+1. ~/.agents/skills/portkey-python-sdk/SKILL.md
+2. ~/.agents/skills/api-key-manager/SKILL.md
+
+Dann: Konfiguriere Portkey Guardrails mit der Python SDK.
+""")
+```
+
+**NIEMALS** Skill-Wissen manuell in den Prompt kopieren — immer den Agenten selbst lesen lassen.
 
 ---
 
